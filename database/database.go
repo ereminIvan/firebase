@@ -10,14 +10,14 @@ import (
 	"strings"
 )
 
-type client interface {
+type IClient interface {
 	Do(req *http.Request) (resp *http.Response, err error)
 }
 
 type DBClient struct {
 	url          string
 	postfix      string
-	client       client
+	client       IClient
 	secret       string
 	export       bool
 	response     *http.Response
@@ -25,7 +25,7 @@ type DBClient struct {
 }
 
 // Retrieve a new Firebase Client
-func NewFBClient(url string) *DBClient {
+func NewDBClient(url string) *DBClient {
 	return &DBClient{
 		url:     url,
 		postfix: ".json",
@@ -43,14 +43,12 @@ func (c *DBClient) Url(url string) *DBClient {
 // Uses the Firebase secret or Auth Token to authenticate.
 func (c *DBClient) Auth(token string) *DBClient {
 	c.secret = token
-
 	return c
 }
 
 // Set to true if you want priority data to be returned.
 func (c *DBClient) Export(toggle bool) *DBClient {
 	c.export = toggle
-
 	return c
 }
 
@@ -104,8 +102,7 @@ func (c *DBClient) Value(v interface{}) error {
 	}
 
 	// JSON decode the data into given interface.
-	err = json.Unmarshal(resp, v)
-	if err != nil {
+	if err = json.Unmarshal(resp, v); err != nil {
 		return err
 	}
 
@@ -140,8 +137,7 @@ func (c *DBClient) Push(v interface{}) error {
 	}
 
 	// POST the data to Firebase.
-	_, err = c.executeRequest("POST", jsonData)
-	if err != nil {
+	if _, err = c.executeRequest("POST", jsonData); err != nil {
 		return err
 	}
 
@@ -158,8 +154,7 @@ func (c *DBClient) Update(v interface{}) error {
 	}
 
 	// PATCH the data on Firebase.
-	_, err = c.executeRequest("PATCH", jsonData)
-	if err != nil {
+	if _, err = c.executeRequest("PATCH", jsonData); err != nil {
 		return err
 	}
 
@@ -169,9 +164,5 @@ func (c *DBClient) Update(v interface{}) error {
 // Delete any values for this node
 func (c *DBClient) Delete() error {
 	_, err := c.executeRequest("DELETE", nil)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
