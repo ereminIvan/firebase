@@ -1,4 +1,4 @@
-package database
+package firebase
 
 import (
 	"bytes"
@@ -8,16 +8,18 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"log"
 )
 
-type IClient interface {
+type IRequestClient interface {
 	Do(req *http.Request) (resp *http.Response, err error)
 }
 
 type DBClient struct {
+	baseUrl      string
 	url          string
 	postfix      string
-	client       IClient
+	client       IRequestClient
 	secret       string
 	export       bool
 	response     *http.Response
@@ -25,9 +27,10 @@ type DBClient struct {
 }
 
 // Retrieve a new Firebase Client
-func NewDBClient(url string) *DBClient {
+func NewDBClient(baseUrl string, auth string) *DBClient {
 	return &DBClient{
-		url:     url,
+		baseUrl: baseUrl,
+		secret: auth,
 		postfix: ".json",
 		export:  false,
 		client:  &http.Client{},
@@ -54,19 +57,17 @@ func (c *DBClient) Export(toggle bool) *DBClient {
 
 // Execute a new HTTP Request.
 func (c *DBClient) executeRequest(method string, body []byte) ([]byte, error) {
-	url, err := url.Parse(c.url + c.postfix)
-	if err != nil {
-		return nil, err
-	}
+	q := url.Values{}
 	if c.secret != "" {
-		url.Query().Set("auth", c.secret)
+		q.Add("auth", c.secret)
 	}
-	if c.export != "" {
-		url.Query().Set("format", "export")
+	if c.export {
+		q.Add("format", "export")
 	}
-
 	// Prepare HTTP Request
-	req, err := http.NewRequest(method, url.String(), bytes.NewReader(body))
+	u := c.baseUrl + c.url + c.postfix + "?" + q.Encode()
+	log.Print(method, u)
+	req, err := http.NewRequest(method, u, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +94,8 @@ func (c *DBClient) executeRequest(method string, body []byte) ([]byte, error) {
 }
 
 // Retrieve the current value for this Reference.
-func (c *DBClient) Value(v interface{}) error {
-
+func (c *DBClient) Get(path string, v interface{}) error {
+	c.url = path
 	// GET the data from Firebase.
 	resp, err := c.executeRequest("GET", nil)
 	if err != nil {
@@ -110,8 +111,8 @@ func (c *DBClient) Value(v interface{}) error {
 }
 
 // Set the value for this Reference (overwrites existing value).
-func (c *DBClient) Write(v interface{}) error {
-
+func (c *DBClient) Update(path string, v interface{}) error {
+	c.url = path
 	// JSON encode the data.
 	jsonData, err := json.Marshal(v)
 	if err != nil {
@@ -128,8 +129,8 @@ func (c *DBClient) Write(v interface{}) error {
 }
 
 // Pushes a new object to this Reference (effectively creates a list).
-func (c *DBClient) Push(v interface{}) error {
-
+func (c *DBClient) Create(path string, v interface{}) error {
+	c.url = path
 	// JSON encode the data.
 	jsonData, err := json.Marshal(v)
 	if err != nil {
@@ -145,8 +146,8 @@ func (c *DBClient) Push(v interface{}) error {
 }
 
 // Update node with give data
-func (c *DBClient) Update(v interface{}) error {
-
+func (c *DBClient) Modify(path string, v interface{}) error {
+	c.url = path
 	// JSON encode the data.
 	jsonData, err := json.Marshal(v)
 	if err != nil {
@@ -162,7 +163,8 @@ func (c *DBClient) Update(v interface{}) error {
 }
 
 // Delete any values for this node
-func (c *DBClient) Delete() error {
+func (c *DBClient) Delete(path string) error {
+	c.url = path
 	_, err := c.executeRequest("DELETE", nil)
 	return err
 }
