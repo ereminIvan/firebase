@@ -5,73 +5,85 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
-	"log"
 )
 
+type Method string
+
+const (
+	POST   Method = "POST"
+	GET    Method = "GET"
+	PATCH  Method = "PATCH"
+	DELETE Method = "DELETET"
+	PUT    Method = "PUT"
+)
+
+const (
+	debugHeader = "X-Firebase-Auth-Debug"
+
+	ParamAccessToken = "auth"
+	ParamFormat      = "format"
+	//ParamShallow - This is an advanced feature, designed to help you work with large datasets without needing to
+	//download everything. Set this to true to limit the depth of the data returned at a location. If the data at the
+	//location is a JSON primitive (string, number or boolean), its value will simply be returned. If the data snapshot
+	//at the location is a JSON object, the values for each key will be truncated to true.
+	ParamShallow = "shallow"
+	//Formats the data returned in the response from the server.
+	//pretty : View the data in a human-readable format.
+	//silent : Used to suppress the output from the server when writing data. The resulting response will be empty and
+	//indicated by a 204 No Content HTTP status code.
+	ParamPrint    = "print"
+	ParamDownload = "download"
+	paramOrderBy  = "orderBy" //todo implement
+)
+
+var availableParams = map[Method][]string{
+	POST:   {ParamAccessToken, ParamPrint},
+	GET:    {ParamAccessToken, ParamShallow, ParamPrint},
+	PATCH:  {ParamAccessToken, ParamPrint},
+	DELETE: {ParamAccessToken, ParamPrint},
+	PUT:    {ParamAccessToken, ParamPrint},
+}
+
+// IRequestClient client interface
 type IRequestClient interface {
 	Do(req *http.Request) (resp *http.Response, err error)
 }
 
-type DBClient struct {
+type dbClient struct {
 	baseUrl      string
-	url          string
-	postfix      string
 	client       IRequestClient
-	secret       string
-	export       bool
+	accessToken  string
+	export       bool //If set to export, the server will encode priorities in the response.
+	shallow      bool //Limit the depth of the response
 	response     *http.Response
 	responseBody []byte
 }
 
 // Retrieve a new Firebase Client
-func NewDBClient(baseUrl string, auth string) *DBClient {
-	return &DBClient{
-		baseUrl: baseUrl,
-		secret: auth,
-		postfix: ".json",
-		export:  false,
-		client:  &http.Client{},
+// baseUrl, accessToken - required
+func NewDBClient(baseUrl, accessToken string, export bool, client IRequestClient) *dbClient {
+	if client == nil {
+		client = &http.Client{}
 	}
-}
-
-// Set url for client request
-func (c *DBClient) Url(url string) *DBClient {
-	c.url = url
-	return c
-}
-
-// Uses the Firebase secret or Auth Token to authenticate.
-func (c *DBClient) Auth(token string) *DBClient {
-	c.secret = token
-	return c
-}
-
-// Set to true if you want priority data to be returned.
-func (c *DBClient) Export(toggle bool) *DBClient {
-	c.export = toggle
-	return c
+	return &dbClient{
+		baseUrl:     baseUrl,
+		accessToken: accessToken,
+		export:      export,
+		client:      client,
+	}
 }
 
 // Execute a new HTTP Request.
-func (c *DBClient) executeRequest(method string, body []byte) ([]byte, error) {
-	q := url.Values{}
-	if c.secret != "" {
-		q.Add("auth", c.secret)
-	}
-	if c.export {
-		q.Add("format", "export")
-	}
-	// Prepare HTTP Request
-	u := c.baseUrl + c.url + c.postfix + "?" + q.Encode()
-	log.Print(method, u)
-	req, err := http.NewRequest(method, u, bytes.NewReader(body))
+func (c *dbClient) executeRequest(method Method, path string, body []byte) ([]byte, error) {
+
+	req, err := c.buildRequest(path, method, body)
 	if err != nil {
 		return nil, err
 	}
-
 	// Make actual HTTP request.
 	if c.response, err = c.client.Do(req); err != nil {
 		return nil, err
@@ -79,6 +91,9 @@ func (c *DBClient) executeRequest(method string, body []byte) ([]byte, error) {
 
 	defer c.response.Body.Close()
 
+	if h := c.response.Header.Get(debugHeader); h != "" {
+		log.Printf("Debug: %s", h)
+	}
 	// Check status code for errors.
 	status := c.response.Status
 	if strings.HasPrefix(status, "2") == false {
@@ -93,34 +108,47 @@ func (c *DBClient) executeRequest(method string, body []byte) ([]byte, error) {
 	return c.responseBody, nil
 }
 
-// Retrieve the current value for this Reference.
-func (c *DBClient) Get(path string, v interface{}) error {
-	c.url = path
-	// GET the data from Firebase.
-	resp, err := c.executeRequest("GET", nil)
+func (c *dbClient) buildRequest(path string, method Method, body []byte) (*http.Request, error) {
+	//Build query params
+	q := url.Values{}
+	if c.accessToken != "" {
+		q.Add(ParamAccessToken, c.accessToken)
+	}
+	if c.export {
+		q.Add(ParamFormat, "export")
+	}
+	if c.shallow {
+		q.Add(ParamShallow, "true")
+	}
+	// Prepare HTTP Request
+	u := c.baseUrl + path + ".json" + "?" + q.Encode()
+
+	return http.NewRequest(string(method), u, bytes.NewReader(body))
+}
+
+// Get the current value for this Reference.
+// Data from our Firebase database can be read by issuing an HTTP GET request to and endpoint
+// A successful request will be indicated by a 200 OK HTTP status code.
+// The response will contain the data being retrieved
+func (c *dbClient) Get(path string, v interface{}) error {
+	resp, err := c.executeRequest(GET, path, nil)
 	if err != nil {
 		return err
 	}
-
-	// JSON decode the data into given interface.
 	if err = json.Unmarshal(resp, v); err != nil {
 		return err
 	}
-
 	return nil
 }
 
-// Set the value for this Reference (overwrites existing value).
-func (c *DBClient) Update(path string, v interface{}) error {
-	c.url = path
-	// JSON encode the data.
+// Write the value for this Reference (overwrites existing value).
+// A successful request will be indicated by a 200 OK HTTP status code.
+func (c *dbClient) Write(path string, v interface{}) error {
 	jsonData, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-
-	// PUT the data to Firebase.
-	_, err = c.executeRequest("PUT", jsonData)
+	_, err = c.executeRequest(PUT, path, jsonData)
 	if err != nil {
 		return err
 	}
@@ -128,17 +156,14 @@ func (c *DBClient) Update(path string, v interface{}) error {
 	return nil
 }
 
-// Pushes a new object to this Reference (effectively creates a list).
-func (c *DBClient) Create(path string, v interface{}) error {
-	c.url = path
-	// JSON encode the data.
+// Create a new object to this Reference (effectively creates a list).
+// A successful request will be indicated by a 200 OK HTTP status code.
+func (c *dbClient) Create(path string, v interface{}) error {
 	jsonData, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-
-	// POST the data to Firebase.
-	if _, err = c.executeRequest("POST", jsonData); err != nil {
+	if _, err = c.executeRequest(POST, path, jsonData); err != nil {
 		return err
 	}
 
@@ -146,16 +171,12 @@ func (c *DBClient) Create(path string, v interface{}) error {
 }
 
 // Update node with give data
-func (c *DBClient) Modify(path string, v interface{}) error {
-	c.url = path
-	// JSON encode the data.
+func (c *dbClient) Update(path string, v interface{}) error {
 	jsonData, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-
-	// PATCH the data on Firebase.
-	if _, err = c.executeRequest("PATCH", jsonData); err != nil {
+	if _, err = c.executeRequest(PATCH, path, jsonData); err != nil {
 		return err
 	}
 
@@ -163,8 +184,7 @@ func (c *DBClient) Modify(path string, v interface{}) error {
 }
 
 // Delete any values for this node
-func (c *DBClient) Delete(path string) error {
-	c.url = path
-	_, err := c.executeRequest("DELETE", nil)
+func (c *dbClient) Delete(path string) error {
+	_, err := c.executeRequest(DELETE, path, nil)
 	return err
 }
