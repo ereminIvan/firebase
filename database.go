@@ -24,6 +24,7 @@ const (
 const (
 	debugHeader = "X-Firebase-Auth-Debug"
 
+	//Available query params
 	ParamAccessToken = "auth"
 	ParamFormat      = "format"
 	//ParamShallow - This is an advanced feature, designed to help you work with large datasets without needing to
@@ -54,13 +55,11 @@ type IRequestClient interface {
 }
 
 type dbClient struct {
-	baseUrl      string
-	client       IRequestClient
-	accessToken  string
-	export       bool //If set to export, the server will encode priorities in the response.
-	shallow      bool //Limit the depth of the response
-	response     *http.Response
-	responseBody []byte
+	baseUrl     string
+	client      IRequestClient
+	accessToken string
+	export      bool //If set to export, the server will encode priorities in the response.
+	shallow     bool //Limit the depth of the response
 }
 
 // Retrieve a new Firebase Client
@@ -85,27 +84,29 @@ func (c *dbClient) executeRequest(method Method, path string, body []byte) ([]by
 		return nil, err
 	}
 	// Make actual HTTP request.
-	if c.response, err = c.client.Do(req); err != nil {
+	res, err := c.client.Do(req)
+	if err != nil {
 		return nil, err
 	}
 
-	defer c.response.Body.Close()
+	defer res.Body.Close()
 
-	if h := c.response.Header.Get(debugHeader); h != "" {
+	if h := res.Header.Get(debugHeader); h != "" {
 		log.Printf("Debug: %s", h)
 	}
 	// Check status code for errors.
-	status := c.response.Status
+	status := res.Status
 	if strings.HasPrefix(status, "2") == false {
 		return nil, errors.New(status)
 	}
 
 	// Read body.
-	if c.responseBody, err = ioutil.ReadAll(c.response.Body); err != nil {
-		return nil, err
+	resBody, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return err, nil
 	}
 
-	return c.responseBody, nil
+	return resBody, nil
 }
 
 func (c *dbClient) buildRequest(path string, method Method, body []byte) (*http.Request, error) {
