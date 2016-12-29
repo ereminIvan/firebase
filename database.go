@@ -103,7 +103,7 @@ func (c *dbClient) executeRequest(method Method, path string, body []byte) ([]by
 	// Read body.
 	resBody, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return err, nil
+		return nil, err
 	}
 
 	return resBody, nil
