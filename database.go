@@ -17,7 +17,7 @@ const (
 	POST   Method = "POST"
 	GET    Method = "GET"
 	PATCH  Method = "PATCH"
-	DELETE Method = "DELETET"
+	DELETE Method = "DELETE"
 	PUT    Method = "PUT"
 )
 
@@ -123,7 +123,7 @@ func (c *dbClient) buildRequest(path string, method Method, body []byte) (*http.
 	}
 	// Prepare HTTP Request
 	u := c.baseUrl + path + ".json" + "?" + q.Encode()
-
+	log.Printf("Firebase request url (%s): %s", string(method), u)
 	return http.NewRequest(string(method), u, bytes.NewReader(body))
 }
 
