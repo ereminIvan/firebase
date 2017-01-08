@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -106,6 +107,10 @@ func (c *dbClient) executeRequest(method Method, path string, body []byte) ([]by
 		return nil, err
 	}
 
+	//Get responce with no nodes return null string instead Not found
+	if method == GET && string(resBody) == "null" {
+		return nil, fmt.Errorf("%d %s", http.StatusNotFound, http.StatusText(http.StatusNotFound))
+	}
 	return resBody, nil
 }
 
@@ -123,7 +128,7 @@ func (c *dbClient) buildRequest(path string, method Method, body []byte) (*http.
 	}
 	// Prepare HTTP Request
 	u := c.baseUrl + path + ".json" + "?" + q.Encode()
-	log.Printf("Firebase request url (%s): %s", string(method), u)
+	log.Printf("FB request (%s): %s", string(method), u)
 	return http.NewRequest(string(method), u, bytes.NewReader(body))
 }
 
