@@ -1,1 +1,1 @@
-# firebase
+# go firebase database client
